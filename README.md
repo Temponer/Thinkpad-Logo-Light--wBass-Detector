@@ -13,7 +13,7 @@ print("Default input device:", sd.default.device)
 
 ### this displays possible sources, choose the default one's number for device variable.
 
-possible output:
+possible output:<br>
 5 sof-hda-dsp: - (hw:0,7), ALSA (4 in, 0 out)<br>
 6 sysdefault, ALSA (128 in, 128 out)<br>
 7 samplerate, ALSA (128 in, 128 out)<br>

@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import time
+import keyboard_lights
 import socket
 
 class ECLED:
@@ -51,6 +52,8 @@ if __name__ == "__main__":
     udp_soc.bind(("127.0.0.1", 5005))
 
     led = ECLED(min_interval_ms=100) 
+    kbled = keyboard_lights.LED(min_interval_ms=100, led = \
+    ['tpacpi::power', 'platform::mute','input3::capslock','platform::micmute'])
     while True:
         # led.update_led()
         # time.sleep(0.05)  # main loop sleep
@@ -59,3 +62,4 @@ if __name__ == "__main__":
             if result == b'A':
                 print("Received message:", result)
                 led.update_led()
+                kbled.update_led()

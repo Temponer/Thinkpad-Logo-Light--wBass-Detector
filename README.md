@@ -26,3 +26,13 @@ possible output:<br>
 
 
 ### run bass.py as normal user and thinkpad_dot.py as root with sudo.
+### bass.py options
+
+```sh
+python3 bass.py --list-devices          # find your input device index
+python3 bass.py --device 13             # run headless (low CPU)
+python3 bass.py --device 13 --plot      # also show the live waveform plot
+python3 bass.py --help                  # all options (blocksize, threshold, delay, fps, ...)
+```
+
+`scipy` is optional but recommended (`pip install scipy`): it makes the filtering much cheaper.

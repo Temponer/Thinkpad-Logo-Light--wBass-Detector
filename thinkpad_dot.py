@@ -60,6 +60,5 @@ if __name__ == "__main__":
         result = udp_soc.recv(1)  # buffer size is 1 byte
         if result is not None:
             if result == b'A':
-                print("Received message:", result)
                 led.update_led()
                 kbled.update_led()

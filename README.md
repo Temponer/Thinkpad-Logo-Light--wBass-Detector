@@ -39,4 +39,15 @@ python3 -c "import socket; socket.socket(socket.AF_INET, socket.SOCK_DGRAM).send
 
 It should print `Received message` and blink.
 
-### run bass.py as normal user and thinkpad_dot.py as root with sudo.
+## Run
+
+One command starts everything (asks for your sudo password once, loads
+`ec_sys` with write support if needed, runs the LED part as root and the audio
+part as you). Close the plot window or press Ctrl+C to stop both:
+
+```sh
+./run.sh
+```
+
+Don't run it with `sudo`. Manual alternative: `sudo python3 thinkpad_dot.py`
+in one terminal and `python3 bass.py` in another.

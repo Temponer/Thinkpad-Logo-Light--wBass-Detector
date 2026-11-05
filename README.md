@@ -12,11 +12,12 @@ output, for example by plugging in headphones, it follows automatically.
 - A ThinkPad running Linux with PulseAudio or PipeWire (any recent Ubuntu,
   Fedora and so on)
 - `pactl` (on Ubuntu/Debian: `sudo apt install pulseaudio-utils`)
-- Python 3 with `sounddevice` and `numpy`, plus `matplotlib` if you want the
-  plot:
+- Python 3 with `sounddevice` and `numpy`. `scipy` is recommended, because it
+  makes the filtering about 25× lighter on the CPU (the script works without
+  it). Add `matplotlib` if you want the plot:
 
   ```sh
-  pip install sounddevice numpy matplotlib
+  pip install sounddevice numpy scipy matplotlib
   ```
 
 ## Quick start
@@ -86,7 +87,8 @@ your music ──► monitor of the default output ──► bass.py
 
 - **`bass.py`** records the "monitor" of your default output (a copy of what
   is playing) and checks every second whether the default output has changed.
-  It sends at most one beat every 100 ms.
+  It sends at most one beat every 100 ms. Audio is processed in ~23 ms blocks
+  so the CPU can idle in between (about 0.1% of one core with scipy).
 - **`thinkpad_dot.py`** must run as root because it writes to the embedded
   controller. It blinks the logo LED and toggles the keyboard LEDs listed in
   its `__main__` section (`tpacpi::power`, `platform::mute`,

@@ -8,6 +8,7 @@ thinkpad_dot.py (UDP 127.0.0.1:5005), which blinks the ThinkPad LEDs.
     python3 bass.py --help       # all options
 """
 import argparse
+import numpy as np
 import os
 import shutil
 import socket
@@ -18,7 +19,7 @@ from collections import deque
 
 # ---------------- DEFAULT SETTINGS (all can be changed with options) ---------
 FS = 44100            # sampling rate
-BLOCKSIZE = 16        # frames per block
+BLOCKSIZE = 1024      # frames per block (~23 ms); bigger = fewer CPU wakeups
 WINDOW = 1            # seconds shown in the plot
 CHANNEL = 0           # 0 = left, 1 = right
 DELAY_SEC = 0.2       # delay before processing, in seconds
@@ -127,18 +128,34 @@ def wanted_source(fixed_source):
 
 
 # ---------------- IIR FILTER -----------------
-class IIRFilter:
+try:
+    from scipy.signal import lfilter as _lfilter
+except ImportError:  # scipy is optional; the fallback just uses more CPU
+    _lfilter = None
+
+
+class BlockIIRFilter:
+    """2nd-order IIR filter that processes a whole block at once."""
+
     def __init__(self, b, a):
-        self.b = b
-        self.a = a
-        self.x1 = self.x2 = 0.0
-        self.y1 = self.y2 = 0.0
+        self.b = np.asarray(b, dtype=np.float64)
+        self.a = np.asarray(a, dtype=np.float64)
+        self.zi = np.zeros(2)                  # state for scipy
+        self.x1 = self.x2 = self.y1 = self.y2 = 0.0  # state for the fallback
 
     def process(self, x):
-        y = self.b[0]*x + self.b[1]*self.x1 + self.b[2]*self.x2 \
-            - (self.a[1]*self.y1 + self.a[2]*self.y2)
-        self.x2, self.x1 = self.x1, x
-        self.y2, self.y1 = self.y1, y
+        if _lfilter is not None:
+            y, self.zi = _lfilter(self.b, self.a, x, zi=self.zi)
+            return y
+        b0, b1, b2 = self.b
+        _, a1, a2 = self.a
+        x1, x2, y1, y2 = self.x1, self.x2, self.y1, self.y2
+        y = np.empty(len(x))
+        for i, xi in enumerate(x.tolist()):
+            yi = b0*xi + b1*x1 + b2*x2 - a1*y1 - a2*y2
+            x2, x1, y2, y1 = x1, xi, y1, yi
+            y[i] = yi
+        self.x1, self.x2, self.y1, self.y2 = x1, x2, y1, y2
         return y
 
 
@@ -152,9 +169,9 @@ class BeatDetector:
         self.min_level = args.min_level
         self.verbose = args.verbose
         self.avg_alpha = BLOCKSIZE / (FS * AVG_SEC)
-        self.filt1 = IIRFilter(b, a)
-        self.filt2 = IIRFilter(b, a)
-        self.delay_queue = deque(maxlen=int(DELAY_SEC * FS))
+        self.filt1 = BlockIIRFilter(b, a)
+        self.filt2 = BlockIIRFilter(b, a)
+        self.delay_len = int(DELAY_SEC * FS)
         self.keep_history = keep_history
         self.raw_history = deque(maxlen=WINDOW * FS)
         self.filtered_history = deque(maxlen=WINDOW * FS)
@@ -164,7 +181,7 @@ class BeatDetector:
         self.reset()
 
     def reset(self):
-        self.delay_queue.clear()
+        self.delay_buf = np.zeros(0)  # samples waiting out the delay
         self.avg = 0.0
         self.blocks = 0
         self.last_send = 0.0
@@ -172,21 +189,20 @@ class BeatDetector:
     def callback(self, indata, frames, time_info, status):
         if status and self.verbose:
             print(f"audio status: {status}")
-        delayed = []
-        dq = self.delay_queue
-        for s in indata[:, CHANNEL]:
-            dq.append(s)
-            if len(dq) == dq.maxlen:
-                delayed.append(dq[0])  # oldest sample
-        if not delayed:
+        # delay: keep the newest DELAY_SEC of audio, release what's older
+        buf = np.concatenate((self.delay_buf, indata[:, CHANNEL]))
+        n_out = len(buf) - self.delay_len
+        if n_out <= 0:
+            self.delay_buf = buf
             return  # still filling the delay buffer
+        delayed, self.delay_buf = buf[:n_out], buf[n_out:]
 
-        filtered = [self.filt2.process(self.filt1.process(s)) for s in delayed]
+        filtered = self.filt2.process(self.filt1.process(delayed))
         if self.keep_history:
             self.raw_history.extend(delayed)
             self.filtered_history.extend(filtered)
 
-        peak = max(abs(v) for v in filtered)
+        peak = float(np.max(np.abs(filtered)))
         if self.fixed_threshold is None:
             # plain running mean while warming up, then a slow moving average
             self.blocks += 1
@@ -207,7 +223,6 @@ class BeatDetector:
 class Plot:
     def __init__(self, detector):
         import matplotlib.pyplot as plt
-        import numpy as np
         self.plt, self.np, self.det = plt, np, detector
         plt.ion()
         self.fig, self.ax = plt.subplots()
@@ -231,9 +246,10 @@ class Plot:
         filt = np.array(det.filtered_history)
         n = min(len(raw), len(filt))
         if n >= 2:
-            x = np.arange(n)
-            self.line_raw.set_data(x, raw[-n:])
-            self.line_filt.set_data(x, filt[-n:])
+            step = max(1, n // 4000)  # a few thousand points look the same
+            x = np.arange(0, n, step)
+            self.line_raw.set_data(x, raw[-n:][::step])
+            self.line_filt.set_data(x, filt[-n:][::step])
             self.ax.set_xlim(0, n)
             t = det.threshold
             self.thr_hi.set_ydata([t, t])

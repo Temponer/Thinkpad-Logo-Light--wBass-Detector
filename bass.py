@@ -196,14 +196,11 @@ def update_plot():
     t = state["threshold"]
     thr_hi.set_ydata([t, t])
     thr_lo.set_ydata([-t, -t])
-    title.set_text(f"{source_label}   |   hits sent: {state['hits']}")
+    title.set_text(f"hits sent: {state['hits']}")
     plt.pause(0.03)
 
 
 # ---------------- STREAM -----------------
-source_label = ""
-
-
 def open_stream(source):
     # Fresh ALSA "pulse" connection picks up the new PULSE_SOURCE.
     os.environ["PULSE_SOURCE"] = source
@@ -213,8 +210,6 @@ def open_stream(source):
                             device=DEVICE, channels=2, callback=callback)
     stream.start()
     print(f"Listening to: {source}  ({DELAY_SEC*1000:.0f} ms delay)")
-    global source_label
-    source_label = f"Listening to: {source}"
     return stream
 
 
@@ -226,6 +221,8 @@ try:
         update_plot()
         if time.monotonic() - last_check >= SINK_CHECK_SEC:
             last_check = time.monotonic()
+            print(f"hits sent: {state['hits']}   "
+                  f"trigger level: {state['threshold']:.3f}")
             new_source = wanted_source()
             if new_source != source:
                 print("Output changed, switching...")

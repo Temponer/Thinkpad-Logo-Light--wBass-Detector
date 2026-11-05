@@ -1,27 +1,40 @@
 #!/usr/bin/env python3
+import os
 import time
-import socket
+
 
 class LED:
-    def __init__(self, led = "platform::mute", offset=12, min_interval_ms=100):
-        self.led_file = [f"/sys/class/leds/{l}/brightness" for l in led]
-        self.offset = offset
+    """Blink LEDs exposed under /sys/class/leds/<name>/brightness.
+
+    LEDs that don't exist on this machine are skipped with a warning instead
+    of crashing (names like 'input3::capslock' differ between machines and can
+    change after a reboot or when devices are plugged in).
+    """
+
+    def __init__(self, led=("platform::mute",), min_interval_ms=100):
+        if isinstance(led, str):
+            led = [led]
+        self.led_file = []
+        for name in led:
+            path = f"/sys/class/leds/{name}/brightness"
+            if os.path.exists(path):
+                self.led_file.append(path)
+            else:
+                print(f"[keyboard_lights] skipping missing LED: {name}")
         self.min_interval = min_interval_ms / 1000.0  # convert ms to seconds
         self._last_update = 0.0
         self._led_state = False  # Track LED state for toggling
 
         self.led_off()  # Ensure LED is off at startup
 
-    def _write_byte(self, byte_val, offset=None):
-        with open(file, "w") as f:
-            if offset is not None:
-                f.seek(offset)
-            f.write(bytes([byte_val]))
-
-    def _write_str(self, string:str):
-      for file in self.led_file:
-        with open(file,"w") as f:
-            f.write(string)
+    def _write_str(self, string: str):
+        for file in list(self.led_file):
+            try:
+                with open(file, "w") as f:
+                    f.write(string)
+            except OSError as e:
+                print(f"[keyboard_lights] can't write {file}: {e} (disabling it)")
+                self.led_file.remove(file)
 
     def led_on(self):
         self._write_str("1")
@@ -36,12 +49,7 @@ class LED:
             self.led_on()
         self._led_state = not self._led_state
 
-    # def led_fade(self):
-    #     self._write_byte(0xaa, self.offset)
-
     def _update_led_implementation(self):
-        # self.led_off()
-        # self.led_fade()s
         self.led_toggle()
 
     def update_led(self):

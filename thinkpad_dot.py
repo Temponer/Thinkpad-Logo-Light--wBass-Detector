@@ -47,19 +47,46 @@ class ECLED:
 
 # Example usage
 if __name__ == "__main__":
+    import argparse
+    import os
+    import sys
+
+    parser = argparse.ArgumentParser(
+        description="Blink the ThinkPad LEDs on beats received from bass.py.")
+    parser.add_argument("-v", "--verbose", action="store_true",
+                        help="print how many beats were received each second")
+    args = parser.parse_args()
+
+    EC_FILE = "/sys/kernel/debug/ec/ec0/io"
+    if os.geteuid() != 0:
+        sys.exit("Run this as root:  sudo python3 thinkpad_dot.py")
+    if not os.path.exists(EC_FILE):
+        sys.exit(f"{EC_FILE} not found. Load the EC driver first:\n"
+                 "  sudo modprobe -r ec_sys\n"
+                 "  sudo modprobe ec_sys write_support=1")
+
     udp_soc = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     udp_soc.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     udp_soc.bind(("127.0.0.1", 5005))
 
-    led = ECLED(min_interval_ms=100) 
-    kbled = keyboard_lights.LED(min_interval_ms=100, led = \
-    ['tpacpi::power', 'platform::mute','input3::capslock','platform::micmute'])
+    led = ECLED(kernel_file=EC_FILE, min_interval_ms=100)
+    kbled = keyboard_lights.LED(min_interval_ms=100, led=
+        ['tpacpi::power', 'platform::mute', 'input3::capslock', 'platform::micmute'])
+    print("Waiting for beats on 127.0.0.1:5005 ...")
+
+    count = 0
+    last_print = time.time()
     while True:
-        # led.update_led()
-        # time.sleep(0.05)  # main loop sleep
         result = udp_soc.recv(1)  # buffer size is 1 byte
-        if result is not None:
-            if result == b'A':
-                print("Received message:", result)
-                led.update_led()
-                kbled.update_led()
+        if result == b'A':
+            count += 1
+            # one failing light must not stop the others
+            for light in (led, kbled):
+                try:
+                    light.update_led()
+                except OSError as e:
+                    print(f"LED write failed ({type(light).__name__}): {e}")
+            now = time.time()
+            if args.verbose and now - last_print >= 1.0:
+                print(f"Received {count} beat(s)")
+                count, last_print = 0, now

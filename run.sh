@@ -6,7 +6,7 @@
 #   - starts bass.py as you (audio side, even if run.sh was started with
 #     sudo); closing it stops both
 set -e
-cd "$(dirname "$0")"
+cd "$(dirname "$(readlink -f "$0")")"   # works through the installed symlink too
 
 for arg in "$@"; do
     case "$arg" in -h|--help) exec python3 bass.py --help ;; esac
@@ -16,6 +16,17 @@ if [ "$EUID" -eq 0 ] && [ -z "$SUDO_USER" ]; then
     echo "Start this from your normal user (with or without sudo), not a root login:"
     echo "  ./run.sh"
     exit 1
+fi
+
+# Installed with ./install.sh --autostart? Then the LED part already runs as
+# a system service; only start the audio part here.
+if systemctl is-active --quiet thinkpad-led.service 2>/dev/null; then
+    if systemctl --user is-active --quiet thinkpad-bass.service 2>/dev/null; then
+        echo "Note: the autostart bass detector is also running. For manual tuning stop it first:"
+        echo "  systemctl --user stop thinkpad-bass"
+    fi
+    echo "LED service is running (logs: journalctl -u thinkpad-led -f)"
+    exec python3 bass.py "$@"
 fi
 
 sudo -v   # ask for the password once, up front

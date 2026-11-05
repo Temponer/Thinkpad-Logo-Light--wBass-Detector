@@ -37,6 +37,37 @@ Press **Ctrl+C** (or close the plot window) to stop both.
 `sudo ./run.sh` also works; the audio part always runs as your user, because
 root can't hear your audio session.
 
+## Install (optional)
+
+So you don't have to `cd` here every time, install it as a command:
+
+```sh
+./install.sh
+```
+
+That adds a `thinkpad-bass` command (same options as `./run.sh`) and installs
+any missing Python packages. To have it start by itself at every login, with
+no terminal and no password prompt:
+
+```sh
+./install.sh --autostart
+```
+
+This loads `ec_sys` with write support at boot, runs the LED part as a system
+service (`thinkpad-led`) and the bass detector as a user service
+(`thinkpad-bass`). Useful commands afterwards:
+
+| What | Command |
+| --- | --- |
+| Status | `systemctl status thinkpad-led` and `systemctl --user status thinkpad-bass` |
+| Live logs | `journalctl --user -u thinkpad-bass -f` |
+| Change options (e.g. `ARGS=-r 1.3`) | edit `~/.config/thinkpad-bass.conf`, then `systemctl --user restart thinkpad-bass` |
+| Stop until next login | `systemctl --user stop thinkpad-bass` |
+| Remove everything | `./install.sh --uninstall` |
+
+The installed command points at this folder, so `git pull` updates it. Don't
+move or delete the folder (if you move it, run `./install.sh` again).
+
 ## Options
 
 Everything after `./run.sh` is passed to the bass detector:

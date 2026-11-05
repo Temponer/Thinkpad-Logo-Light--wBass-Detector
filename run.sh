@@ -31,9 +31,16 @@ for arg in "$@"; do
     case "$arg" in -v|--verbose) LED_ARGS+=(-v) ;; esac
 done
 
-sudo python3 thinkpad_dot.py "${LED_ARGS[@]}" &
+# Save the terminal settings so they can be restored no matter what.
+TTY_STATE=$(stty -g 2>/dev/null || true)
+restore_tty() { [ -n "$TTY_STATE" ] && stty "$TTY_STATE" 2>/dev/null || true; }
+
+# Keep the background sudo off the terminal (stdin from /dev/null, output
+# through a pipe). Otherwise newer sudo puts the terminal in raw mode and
+# everything printed afterwards comes out as a broken "staircase".
+sudo python3 -u thinkpad_dot.py "${LED_ARGS[@]}" </dev/null > >(cat) 2>&1 &
 LED_PID=$!
-trap 'sudo kill "$LED_PID" 2>/dev/null; wait "$LED_PID" 2>/dev/null' EXIT
+trap 'sudo kill "$LED_PID" 2>/dev/null; wait "$LED_PID" 2>/dev/null; restore_tty' EXIT
 
 sleep 0.5
 if ! kill -0 "$LED_PID" 2>/dev/null; then

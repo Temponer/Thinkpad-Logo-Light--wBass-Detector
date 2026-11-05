@@ -22,4 +22,21 @@ pactl list short sources
 
 (use a name ending in `.monitor` to capture an output).
 
+## Trigger level
+
+By default the trigger is adaptive (`PEAK_THRESHOLD = None`): the LED fires when
+the bass is `BEAT_RATIO` times louder than its average over the last
+`AVG_SEC` seconds, so it works at any volume. The red dashed lines on the plot
+show the current trigger level and the title counts the hits sent. Lower
+`BEAT_RATIO` (e.g. 1.3) for more flashes, raise it (e.g. 2.0) for fewer, or
+set `PEAK_THRESHOLD` to a number for a fixed level.
+
+To check the LED side alone, with `thinkpad_dot.py` running:
+
+```sh
+python3 -c "import socket; socket.socket(socket.AF_INET, socket.SOCK_DGRAM).sendto(b'A', ('127.0.0.1', 5005))"
+```
+
+It should print `Received message` and blink.
+
 ### run bass.py as normal user and thinkpad_dot.py as root with sudo.

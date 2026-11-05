@@ -31,7 +31,15 @@ a = [1.0, -1.979851353142371, 0.9800523188151258]  # feedback
 b = [0.00005024141818873903,
      0.00010048283637747806,
      0.00005024141818873903]   # feedforward
-PEAK_THRESHOLD = 0.45
+# Trigger level on the filtered (bass) signal.
+#   None   -> adaptive: fire when the bass is BEAT_RATIO times louder than its
+#             recent average. Works at any volume / any output device.
+#   number -> fixed level, e.g. 0.45 (the dashed lines on the plot show it)
+PEAK_THRESHOLD = None
+BEAT_RATIO = 1.6       # adaptive: how far above the average a hit must be
+AVG_SEC = 2.0          # adaptive: how long the "recent average" is
+MIN_LEVEL = 0.01       # ignore anything quieter than this (silence/noise)
+COOLDOWN_SEC = 0.1     # send at most one UDP message per this many seconds
 
 # UDP (sender only -- thinkpad_dot.py is the one listening on 5005)
 udp_soc = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -119,8 +127,14 @@ ax.set_ylim(-1, 1)
 ax.set_xlim(0, WINDOW*FS)
 ax.set_xlabel("Samples")
 ax.set_ylabel("Amplitude")
-ax.legend()
+thr_hi = ax.axhline(0, color="red", ls="--", lw=1, label="Threshold")
+thr_lo = ax.axhline(0, color="red", ls="--", lw=1)
+ax.legend(loc="upper right")
 title = ax.set_title("Real-time Audio (Raw vs Filtered)")
+
+# trigger state (shared between the audio callback and the plot)
+state = {"avg": 0.0, "blocks": 0, "threshold": MIN_LEVEL, "last_send": 0.0, "hits": 0}
+AVG_ALPHA = BLOCKSIZE / (FS * AVG_SEC)
 
 
 # ---------------- CALLBACK -----------------
@@ -148,7 +162,21 @@ def callback(indata, frames, time_info, status):
     filtered_history.extend(second_pass)
 
     # Trigger only on delayed + filtered signal
-    if max(np.abs(second_pass)) > PEAK_THRESHOLD:
+    peak = max(abs(v) for v in second_pass)
+    if PEAK_THRESHOLD is None:
+        # plain running mean while warming up, then a slow moving average
+        state["blocks"] += 1
+        alpha = max(AVG_ALPHA, 1.0 / state["blocks"])
+        state["avg"] += (peak - state["avg"]) * alpha
+        threshold = max(MIN_LEVEL, state["avg"] * BEAT_RATIO)
+    else:
+        threshold = PEAK_THRESHOLD
+    state["threshold"] = threshold
+
+    now = time.monotonic()
+    if peak > threshold and now - state["last_send"] >= COOLDOWN_SEC:
+        state["last_send"] = now
+        state["hits"] += 1
         udp_soc.sendto(b"A", ("127.0.0.1", 5005))
 
 
@@ -165,19 +193,28 @@ def update_plot():
     line_raw.set_data(x, data_raw[-n:])
     line_filt.set_data(x, data_filt[-n:])
     ax.set_xlim(0, n)
+    t = state["threshold"]
+    thr_hi.set_ydata([t, t])
+    thr_lo.set_ydata([-t, -t])
+    title.set_text(f"{source_label}   |   hits sent: {state['hits']}")
     plt.pause(0.03)
 
 
 # ---------------- STREAM -----------------
+source_label = ""
+
+
 def open_stream(source):
     # Fresh ALSA "pulse" connection picks up the new PULSE_SOURCE.
     os.environ["PULSE_SOURCE"] = source
     delay_queue.clear()
+    state["avg"], state["blocks"] = 0.0, 0
     stream = sd.InputStream(samplerate=FS, blocksize=BLOCKSIZE,
                             device=DEVICE, channels=2, callback=callback)
     stream.start()
     print(f"Listening to: {source}  ({DELAY_SEC*1000:.0f} ms delay)")
-    title.set_text(f"Listening to: {source}")
+    global source_label
+    source_label = f"Listening to: {source}"
     return stream
 
 

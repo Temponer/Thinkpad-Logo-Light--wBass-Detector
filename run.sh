@@ -2,13 +2,14 @@
 # Start everything with one command:  ./run.sh
 #   - loads the EC driver with write support (if needed)
 #   - starts thinkpad_dot.py as root in the background (LED side)
-#   - starts bass.py as you (audio side); closing it stops both
+#   - starts bass.py as you (audio side, even if run.sh was started with
+#     sudo); closing it stops both
 set -e
 cd "$(dirname "$0")"
 
-if [ "$EUID" -eq 0 ]; then
-    echo "Run ./run.sh WITHOUT sudo (bass.py must run as you to hear your audio)."
-    echo "It will ask for your password itself."
+if [ "$EUID" -eq 0 ] && [ -z "$SUDO_USER" ]; then
+    echo "Start this from your normal user (with or without sudo), not a root login:"
+    echo "  ./run.sh"
     exit 1
 fi
 

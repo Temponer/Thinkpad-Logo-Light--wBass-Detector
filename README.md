@@ -49,5 +49,5 @@ part as you). Close the plot window or press Ctrl+C to stop both:
 ./run.sh
 ```
 
-Don't run it with `sudo`. Manual alternative: `sudo python3 thinkpad_dot.py`
+`sudo ./run.sh` works too; the audio part always runs as your user. Manual alternative: `sudo python3 thinkpad_dot.py`
 in one terminal and `python3 bass.py` in another.

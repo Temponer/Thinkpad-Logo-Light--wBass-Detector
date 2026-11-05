@@ -5,6 +5,49 @@ import time
 import socket
 from collections import deque
 
+import sys
+
+
+def drop_root_if_sudo():
+    """Audio lives in *your* user session; root can't see it.
+
+    If started with sudo, re-run this script as the user who ran sudo,
+    passing along what it needs to reach the sound server and the screen.
+    """
+    if os.geteuid() != 0:
+        return
+    user = os.environ.get("SUDO_USER")
+    if not user or user == "root":
+        sys.exit("bass.py can't hear your audio as root. Run it as your normal "
+                 "user:  python3 bass.py   (or use ./run.sh)")
+    import pwd
+    pw = pwd.getpwnam(user)
+    runtime = f"/run/user/{pw.pw_uid}"
+    env = {
+        "HOME": pw.pw_dir,
+        "USER": user,
+        "LOGNAME": user,
+        "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
+        "XDG_RUNTIME_DIR": runtime,
+        "DBUS_SESSION_BUS_ADDRESS": f"unix:path={runtime}/bus",
+        "DISPLAY": os.environ.get("DISPLAY", ":0"),
+    }
+    for key in ("WAYLAND_DISPLAY", "XAUTHORITY", "MPLBACKEND"):
+        if os.environ.get(key):
+            env[key] = os.environ[key]
+    if "XAUTHORITY" not in env:
+        for path in (f"{runtime}/gdm/Xauthority", f"{pw.pw_dir}/.Xauthority"):
+            if os.path.exists(path):
+                env["XAUTHORITY"] = path
+                break
+    print(f"Started with sudo; running the audio part as '{user}' instead.")
+    cmd = ["sudo", "-u", user, "env"] + [f"{k}={v}" for k, v in env.items()] \
+        + [sys.executable, os.path.abspath(__file__)] + sys.argv[1:]
+    os.execvp("sudo", cmd)
+
+
+drop_root_if_sudo()
+
 import numpy as np
 import matplotlib.pyplot as plt
 

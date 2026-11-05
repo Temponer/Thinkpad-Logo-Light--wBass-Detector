@@ -47,8 +47,15 @@ class ECLED:
 
 # Example usage
 if __name__ == "__main__":
+    import argparse
     import os
     import sys
+
+    parser = argparse.ArgumentParser(
+        description="Blink the ThinkPad LEDs on beats received from bass.py.")
+    parser.add_argument("-v", "--verbose", action="store_true",
+                        help="print how many beats were received each second")
+    args = parser.parse_args()
 
     EC_FILE = "/sys/kernel/debug/ec/ec0/io"
     if os.geteuid() != 0:
@@ -80,6 +87,6 @@ if __name__ == "__main__":
                 except OSError as e:
                     print(f"LED write failed ({type(light).__name__}): {e}")
             now = time.time()
-            if now - last_print >= 1.0:
+            if args.verbose and now - last_print >= 1.0:
                 print(f"Received {count} beat(s)")
                 count, last_print = 0, now

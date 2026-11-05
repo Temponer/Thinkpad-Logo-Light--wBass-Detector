@@ -3,26 +3,23 @@ sudo modprobe -r ec_sys
 sudo modprobe ec_sys write_support=1
 ```
 
-choose the default sound source (monitor)
+## Sound source
 
-```py
-print(sd.query_devices())
-print("Default input device:", sd.default.device)
+`bass.py` listens to **whatever is currently playing on your default output**
+(the "monitor" of the default sink), not the microphone. It follows the output
+automatically: laptop speakers when nothing is plugged in, headphones /
+Bluetooth / HDMI when they become the default. It checks every second and
+switches by itself.
+
+Needs PulseAudio or PipeWire (`pipewire-pulse`) and `pactl`
+(`sudo apt install pulseaudio-utils` if it is missing).
+
+To pin a specific source instead, set `SOURCE` in `bass.py` to one of:
+
+```sh
+pactl list short sources
 ```
 
-
-### this displays possible sources, choose the default one's number for device variable.
-
-possible output:<br>
-5 sof-hda-dsp: - (hw:0,7), ALSA (4 in, 0 out)<br>
-6 sysdefault, ALSA (128 in, 128 out)<br>
-7 samplerate, ALSA (128 in, 128 out)<br>
-8 speexrate, ALSA (128 in, 128 out)<br>
-9 pulse, ALSA (32 in, 32 out)<br>
-10 upmix, ALSA (8 in, 8 out)<br>
-11 vdownmix, ALSA (6 in, 6 out)<br>
-12 dmix, ALSA (0 in, 2 out)<br>
-13 default, ALSA (32 in, 32 out)
-
+(use a name ending in `.monitor` to capture an output).
 
 ### run bass.py as normal user and thinkpad_dot.py as root with sudo.

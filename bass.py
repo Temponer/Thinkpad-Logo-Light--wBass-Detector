@@ -1,21 +1,30 @@
-import sounddevice as sd
+import os
+import shutil
+import subprocess
+import time
+import socket
+from collections import deque
+
 import numpy as np
 import matplotlib.pyplot as plt
-from collections import deque
-import socket
-from thinkpad_dot import ECLED
 
 # ---------------- SETTINGS -----------------
 FS = 44100            # sampling rate
 BLOCKSIZE = 16        # frames per block
-DEVICE = 13           # PulseAudio input (see sd.query_devices())
 WINDOW = 1            # seconds to display
 CHANNEL = 0           # 0 = left, 1 = right
 DELAY_SEC = 0.2       # delay in seconds
 DELAY_SAMPLES = int(DELAY_SEC * FS)
 
-print(sd.query_devices())
-print("Default input device:", sd.default.device)
+# Which sound to listen to.
+#   None  -> follow the default output automatically (laptop speakers,
+#            headphones, Bluetooth, HDMI ...). Switches when the default
+#            output changes, e.g. when you plug in headphones.
+#   "..." -> a fixed PulseAudio/PipeWire source name, e.g.
+#            "alsa_output.pci-0000_00_1f.3.analog-stereo.monitor"
+#            (list them with: pactl list short sources)
+SOURCE = None
+SINK_CHECK_SEC = 1.0  # how often to check if the default output changed
 
 # IIR filter coefficients (example: 2nd-order bandpass)
 a = [1.0, -1.979851353142371, 0.9800523188151258]  # feedback
@@ -24,17 +33,62 @@ b = [0.00005024141818873903,
      0.00005024141818873903]   # feedforward
 PEAK_THRESHOLD = 0.45
 
-# UDP
+# UDP (sender only -- thinkpad_dot.py is the one listening on 5005)
 udp_soc = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-udp_soc.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-udp_soc.bind(("", 5005))
+
+
+# ---------------- AUDIO SOURCE SELECTION -----------------
+def get_default_sink():
+    """Return the name of the current default output (sink), or None."""
+    if not shutil.which("pactl"):
+        return None
+    try:
+        out = subprocess.run(["pactl", "get-default-sink"], capture_output=True,
+                             text=True, timeout=2)
+        if out.returncode == 0 and out.stdout.strip():
+            return out.stdout.strip()
+        # older pactl without get-default-sink
+        out = subprocess.run(["pactl", "info"], capture_output=True,
+                             text=True, timeout=2)
+        for line in out.stdout.splitlines():
+            if line.startswith("Default Sink:"):
+                return line.split(":", 1)[1].strip()
+    except (OSError, subprocess.SubprocessError):
+        pass
+    return None
+
+
+def wanted_source():
+    """The PulseAudio/PipeWire source we should be recording from."""
+    if SOURCE:
+        return SOURCE
+    sink = get_default_sink()
+    return f"{sink}.monitor" if sink else "@DEFAULT_MONITOR@"
+
+
+# PortAudio/ALSA's "pulse" device records from whatever $PULSE_SOURCE names.
+# It must be set before sounddevice opens a stream.
+os.environ["PULSE_SOURCE"] = wanted_source()
+import sounddevice as sd  # noqa: E402
+
+
+def find_pulse_device():
+    for i, dev in enumerate(sd.query_devices()):
+        if dev["name"] == "pulse" and dev["max_input_channels"] > 0:
+            return i
+    raise RuntimeError("No 'pulse' ALSA device found. Is PulseAudio or "
+                       "pipewire-pulse running? (sd.query_devices() lists devices)")
+
+
+DEVICE = find_pulse_device()
+
 
 # ---------------- IIR FILTER CLASS -----------------
 class IIRFilter:
     def __init__(self, b, a):
         self.b = b
         self.a = a
-        self.x1 = self.x2 = 0.0 
+        self.x1 = self.x2 = 0.0
         self.y1 = self.y2 = 0.0
 
     def process(self, x):
@@ -44,6 +98,7 @@ class IIRFilter:
         self.x2, self.x1 = self.x1, x
         self.y2, self.y1 = self.y1, y
         return y
+
 
 # ---------------- CREATE TWO FILTERS -----------------
 filt1 = IIRFilter(b, a)
@@ -65,10 +120,11 @@ ax.set_xlim(0, WINDOW*FS)
 ax.set_xlabel("Samples")
 ax.set_ylabel("Amplitude")
 ax.legend()
-plt.title("Real-time Audio (Raw vs Filtered)")
+title = ax.set_title("Real-time Audio (Raw vs Filtered)")
+
 
 # ---------------- CALLBACK -----------------
-def callback(indata, frames, time, status):
+def callback(indata, frames, time_info, status):
     if status:
         print(status)
     samples = indata[:, CHANNEL]  # select channel
@@ -91,42 +147,59 @@ def callback(indata, frames, time, status):
     raw_history.extend(delayed_samples)
     filtered_history.extend(second_pass)
 
-    # Ensure both have exactly the same length
-    min_len = min(len(raw_history), len(filtered_history))
-    while len(raw_history) > min_len:
-        raw_history.popleft()
-    while len(filtered_history) > min_len:
-        filtered_history.popleft()
-
     # Trigger only on delayed + filtered signal
     if max(np.abs(second_pass)) > PEAK_THRESHOLD:
         udp_soc.sendto(b"A", ("127.0.0.1", 5005))
+
 
 # ---------------- PLOT UPDATE -----------------
 def update_plot():
     data_raw = np.array(raw_history)
     data_filt = np.array(filtered_history)
 
-    min_len = min(len(data_raw), len(data_filt))
-    data_raw = data_raw[-min_len:]
-    data_filt = data_filt[-min_len:]
-    x = np.arange(len(data_raw))
+    n = min(len(data_raw), len(data_filt))
+    if n < 2:
+        plt.pause(0.05)
+        return
+    x = np.arange(n)
+    line_raw.set_data(x, data_raw[-n:])
+    line_filt.set_data(x, data_filt[-n:])
+    ax.set_xlim(0, n)
+    plt.pause(0.03)
 
-    line_raw.set_xdata(x)
-    line_raw.set_ydata(data_raw)
-    line_filt.set_xdata(x)
-    line_filt.set_ydata(data_filt)
-
-    ax.set_xlim(0, len(data_raw))
-    fig.canvas.draw()
-    fig.canvas.flush_events()
 
 # ---------------- STREAM -----------------
-with sd.InputStream(samplerate=FS, blocksize=BLOCKSIZE,
-                    device=DEVICE, channels=2, callback=callback):
-    print(f"Listening with {DELAY_SEC*1000:.0f} ms delayed processing...")
+def open_stream(source):
+    # Fresh ALSA "pulse" connection picks up the new PULSE_SOURCE.
+    os.environ["PULSE_SOURCE"] = source
+    delay_queue.clear()
+    stream = sd.InputStream(samplerate=FS, blocksize=BLOCKSIZE,
+                            device=DEVICE, channels=2, callback=callback)
+    stream.start()
+    print(f"Listening to: {source}  ({DELAY_SEC*1000:.0f} ms delay)")
+    title.set_text(f"Listening to: {source}")
+    return stream
+
+
+try:
+    source = wanted_source()
+    stream = open_stream(source)
+    last_check = time.monotonic()
+    while plt.fignum_exists(fig.number):
+        update_plot()
+        if time.monotonic() - last_check >= SINK_CHECK_SEC:
+            last_check = time.monotonic()
+            new_source = wanted_source()
+            if new_source != source:
+                print("Output changed, switching...")
+                stream.close()
+                source = new_source
+                stream = open_stream(source)
+except KeyboardInterrupt:
+    pass
+finally:
     try:
-        while True:
-            update_plot()
-    except KeyboardInterrupt:
-        print("Stopped.")
+        stream.close()
+    except Exception:
+        pass
+    print("Stopped.")
